@@ -5,7 +5,7 @@ require "fluent/plugin/formatter"
 
 require 'openssl'
 require 'multi_json'
-require 'net/http/persistent'
+require 'net/http'
 
 module Fluent::Plugin
   class SplunkHecOutput < Fluent::Plugin::Output
@@ -195,26 +195,26 @@ module Fluent::Plugin
 
     def prepare_key_fields
       KEY_FIELDS.each { |f|
-	v = instance_variable_get "@#{f}_key"
-	if v
-	  attrs = v.split('.').freeze
-	  if @keep_keys
-	    instance_variable_set "@#{f}", ->(_, record) { attrs.inject(record) { |o, k| o[k] } }
-	  else
-	    instance_variable_set "@#{f}", ->(_, record) {
-	      attrs[0...-1].inject(record) { |o, k| o[k] }.delete(attrs[-1])
-	    }
-	  end
-	else
-	  v = instance_variable_get "@#{f}"
-	  next unless v
+      	v = instance_variable_get "@#{f}_key"
+      	if v
+      	  attrs = v.split('.').freeze
+          if @keep_keys
+      	    instance_variable_set "@#{f}", ->(_, record) { attrs.inject(record) { |o, k| o[k] } }
+      	  else
+      	    instance_variable_set "@#{f}", ->(_, record) {
+      	      attrs[0...-1].inject(record) { |o, k| o[k] }.delete(attrs[-1])
+      	    }
+      	  end
+      	else
+      	  v = instance_variable_get "@#{f}"
+      	  next unless v
 
-	  if v == TAG_PLACEHOLDER
-	    instance_variable_set "@#{f}", ->(tag, _) { tag }
-	  else
-	    instance_variable_set "@#{f}", ->(_, _) { v }
-	  end
-	end
+      	  if v == TAG_PLACEHOLDER
+      	    instance_variable_set "@#{f}", ->(tag, _) { tag }
+      	  else
+      	    instance_variable_set "@#{f}", ->(_, _) { v }
+      	  end
+      	end
       }
     end
 
@@ -237,22 +237,21 @@ module Fluent::Plugin
 
     def pick_custom_format_method
       if @data_type == :event
-	define_singleton_method :format, method(:format_event)
+        define_singleton_method :format, method(:format_event)
       else
-	define_singleton_method :format, method(:format_metric)
+        define_singleton_method :format, method(:format_metric)
       end
     end
 
     def format_event(tag, time, record)
       MultiJson.dump({
-	host: @host ? @host.(tag, record) : @default_host,
-	# From the API reference
-	# http://docs.splunk.com/Documentation/Splunk/latest/RESTREF/RESTinput#services.2Fcollector
-	# `time` should be a string or unsigned integer.
-	# That's why we use the to_string function here.
-	time: time.to_f.to_s
+      	host: @host ? @host.(tag, record) : @default_host,
+      	# From the API reference
+      	# http://docs.splunk.com/Documentation/Splunk/latest/RESTREF/RESTinput#services.2Fcollector
+      	# `time` should be a string or unsigned integer.
+      	# That's why we use the to_string function here.
+      	time: time.to_f.to_s
       }.tap { |payload|
-
         if @time
           time_value = @time.(tag, record)
           # if no value is found don't override and use fluentd's time
@@ -261,62 +260,62 @@ module Fluent::Plugin
           end
         end
 
-	payload[:index] = @index.(tag, record) if @index
-	payload[:source] = @source.(tag, record) if @source
-	payload[:sourcetype] = @sourcetype.(tag, record) if @sourcetype
+      	payload[:index] = @index.(tag, record) if @index
+      	payload[:source] = @source.(tag, record) if @source
+      	payload[:sourcetype] = @sourcetype.(tag, record) if @sourcetype
 
-	# delete nil fields otherwise will get formet error from HEC
-	%i[host index source sourcetype].each { |f| payload.delete f if payload[f].nil? }
+      	# delete nil fields otherwise will get formet error from HEC
+      	%i[host index source sourcetype].each { |f| payload.delete f if payload[f].nil? }
 
-	if @extra_fields
-    payload[:fields] = @extra_fields.map { |name, field| [name, record[field]] }.to_h
-    payload[:fields].delete_if { |_k,v| v.nil? }
-	  # if a field is already in indexed fields, then remove it from the original event
-	  @extra_fields.values.each { |field| record.delete field }
-	end
-	if formatter = @formatters.find { |f| f.match? tag }
-	  record = formatter.format(tag, time, record)
-	end
-	payload[:event] = convert_to_utf8 record
+      	if @extra_fields
+          payload[:fields] = @extra_fields.map { |name, field| [name, record[field]] }.to_h
+          payload[:fields].delete_if { |_k,v| v.nil? }
+      	  # if a field is already in indexed fields, then remove it from the original event
+      	  @extra_fields.values.each { |field| record.delete field }
+      	end
+      	if formatter = @formatters.find { |f| f.match? tag }
+      	  record = formatter.format(tag, time, record)
+      	end
+      	payload[:event] = convert_to_utf8 record
       })
     end
 
     def format_metric(tag, time, record)
       payload = {
-	host: @host ? @host.(tag, record) : @default_host,
-	# From the API reference
-	# http://docs.splunk.com/Documentation/Splunk/latest/RESTREF/RESTinput#services.2Fcollector
-	# `time` should be a string or unsigned integer.
-	# That's why we use `to_s` here.
-	time: time.to_f.to_s,
-	event: 'metric'
+      	host: @host ? @host.(tag, record) : @default_host,
+      	# From the API reference
+      	# http://docs.splunk.com/Documentation/Splunk/latest/RESTREF/RESTinput#services.2Fcollector
+      	# `time` should be a string or unsigned integer.
+      	# That's why we use `to_s` here.
+      	time: time.to_f.to_s,
+      	event: 'metric'
       }
       payload[:index] = @index.(tag, record) if @index
       payload[:source] = @source.(tag, record) if @source
       payload[:sourcetype] = @sourcetype.(tag, record) if @sourcetype
 
       if not @metrics_from_event
-	fields = {
-	  metric_name: @metric_name.(tag, record),
-	  _value: @metric_value.(tag, record)
-	}
+      	fields = {
+      	  metric_name: @metric_name.(tag, record),
+      	  _value: @metric_value.(tag, record)
+      	}
 
-	if @extra_fields
-	  fields.update @extra_fields.map { |name, field| [name, record[field]] }.to_h
-	else
-	  fields.update record
-	end
+      	if @extra_fields
+      	  fields.update @extra_fields.map { |name, field| [name, record[field]] }.to_h
+      	else
+      	  fields.update record
+      	end
 
-  fields.delete_if { |_k,v| v.nil? }
+        fields.delete_if { |_k,v| v.nil? }
 
-	payload[:fields] = convert_to_utf8 fields
+      	payload[:fields] = convert_to_utf8 fields
 
-	return MultiJson.dump(payload)
+      	return MultiJson.dump(payload)
       end
 
       # when metrics_from_event is true, generate one metric event for each key-value in record
       payloads = record.map { |key, value|
-	{fields: {metric_name: key, _value: value}}.merge! payload
+      	{fields: {metric_name: key, _value: value}}.merge! payload
       }
 
       payloads.map!(&MultiJson.method(:dump)).join
@@ -329,30 +328,32 @@ module Fluent::Plugin
     end
 
     def new_connection
-      Net::HTTP::Persistent.new.tap do |c|
-        c.verify_mode = @insecure_ssl ? OpenSSL::SSL::VERIFY_NONE : OpenSSL::SSL::VERIFY_PEER
-        c.cert = OpenSSL::X509::Certificate.new File.read(@client_cert) if @client_cert
-        c.key = OpenSSL::PKey::RSA.new File.read(@client_key) if @client_key
-        c.ca_file = @ca_file
-        c.ca_path = @ca_path
-        c.ciphers = @ssl_ciphers
-        c.idle_timeout = @idle_timeout
-        c.read_timeout = @read_timeout
-        c.open_timeout = @open_timeout
+      uri = URI.parse("#{@protocol}://#{@hec_host}:#{@hec_port}/services/collector")
+      https = Net::HTTP.new(uri.host, uri.port)
 
-        c.override_headers['Content-Type'] = 'application/json'
-        c.override_headers['User-Agent'] = "fluent-plugin-splunk_hec_out/#{VERSION}"
-        c.override_headers['Authorization'] = "Splunk #{@hec_token}"
-      end
+      https.verify_mode = @insecure_ssl ? OpenSSL::SSL::VERIFY_NONE : OpenSSL::SSL::VERIFY_PEER
+      https.cert = OpenSSL::X509::Certificate.new File.read(@client_cert) if @client_cert
+      https.key = OpenSSL::PKey::RSA.new File.read(@client_key) if @client_key
+      https.ca_file = @ca_file
+      https.ca_path = @ca_path
+      https.ciphers = @ssl_ciphers
+      https.read_timeout = @read_timeout
+      https.open_timeout = @open_timeout
+      return https
     end
 
     def send_to_hec(chunk)
-      post = Net::HTTP::Post.new @hec_api.request_uri
+      headers = {
+        'Content-Type' => 'application/json',
+        'User-Agent' => "fluent-plugin-splunk_hec_out/#{VERSION}",
+        'Authorization' => "Splunk #{@hec_token}"
+      }
+      post = Net::HTTP::Post.new(@hec_api.request_uri, initheader = headers)
       post.body = chunk.read
       log.debug { "Sending #{post.body.bytesize} bytes to Splunk." }
 
       log.trace { "POST #{@hec_api} body=#{post.body}" }
-      response = @hec_conn.request @hec_api, post
+      response = @hec_conn.request(post)
       log.debug { "[Response] POST #{@hec_api}: #{response.inspect}" }
 
       # raise Exception to utilize Fluentd output plugin retry machanism
@@ -361,8 +362,8 @@ module Fluent::Plugin
       # For both success response (2xx) and client errors (4xx), we will consume the chunk.
       # Because there probably a bug in the code if we get 4xx errors, retry won't do any good.
       if not response.code.start_with?('2')
-	log.error "Failed POST to #{@hec_api}, response: #{response.body}"
-	log.debug { "Failed request body: #{post.body}" }
+      	log.error "Failed POST to #{@hec_api}, response: #{response.body}"
+      	log.debug { "Failed request body: #{post.body}" }
       end
     end
 
